@@ -1,17 +1,19 @@
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::thread;
+use std::time::Duration;
 
 use abstract_ns;
 use ns_std_threaded;
 use futures::future::Either;
-use tokio_core::reactor::{Handle, Timeout};
+use tokio_core::reactor::{Handle, Timeout, Interval};
 use tokio_core::net::TcpListener;
 use futures::Stream;
 use futures::future::{Future, ok};
 use futures::sync::oneshot::{channel as oneshot, Sender, Receiver};
+use futures::sync::mpsc::unbounded;
 use futures_cpupool;
 use self_meter_http::Meter;
 use tk_http;
@@ -25,6 +27,7 @@ use handlers;
 use runtime::Runtime;
 use http_pools::{HttpPools};
 use handlers::files::{DiskPools};
+use request_id;
 
 
 pub struct State {
@@ -33,6 +36,7 @@ pub struct State {
     disk_pools: DiskPools,
     ns: abstract_ns::Router,
     listener_shutters: HashMap<SocketAddr, Sender<()>>,
+    // replication_session: chat::replication::Watcher,
     runtime: Arc<Runtime>,
 }
 
@@ -103,6 +107,8 @@ pub fn populate_loop(handle: &Handle, cfg: &ConfigCell, verbose: bool)
     let http_pools = HttpPools::new();
     let session_pools = chat::SessionPools::new();
     let disk_pools = DiskPools::new(&meter);
+    // let (tx, rx) = unbounded();
+    // let mut links_man = LinksManager::new(request_id::new(), tx);
     let runtime = Arc::new(Runtime {
         config: cfg.clone(),
         handle: handle.clone(),
@@ -137,6 +143,37 @@ pub fn populate_loop(handle: &Handle, cfg: &ConfigCell, verbose: bool)
         }
     }
 
+    // TODO: Must have worker id;
+    // for sock in &root.replication.listen {
+    //     match sock {
+    //         &ListenSocket::Tcp(addr) => {
+    //             if verbose {
+    //                 println!("Listening at {}", addr);
+    //             }
+    //             let (tx, rx) = oneshot();
+    //             match links_man.listener(addr, &runtime, handle, rx) {
+    //                 Ok(()) => {
+    //                     listener_shutters.insert(addr, tx);
+    //                 }
+    //                 Err(e) => {
+    //                     error!("Error listening {}: {}. Will retry on next \
+    //                             configuration reload", addr, e);
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+    // links_man.update(&root.replication);
+    // let mut lnk = links_man.clone();
+    // let handle2 = handle.clone();
+    // handle.spawn(Interval::new(Duration::new(5, 0), &handle)
+    // .expect("interval created")
+    // .map_err(|e| error!("Interval error: {}", e))
+    // .for_each(move |_| {
+    //     lnk.reconnect(&handle2);
+    //     Ok(())
+    // }));
+    // TODO: call single chat::replication_smthg.update(&root.replication)
 
     disk_pools.update(&root.disk_pools);
     http_pools.update(&root.http_destinations, &resolver, handle);
@@ -145,6 +182,7 @@ pub fn populate_loop(handle: &Handle, cfg: &ConfigCell, verbose: bool)
         ns: resolver,
         http_pools: http_pools,
         session_pools: session_pools,
+        // links_manager: links_man,
         listener_shutters: listener_shutters,
         runtime: runtime,
         disk_pools: disk_pools,
@@ -157,4 +195,5 @@ pub fn update_loop(state: &mut State, cfg: &ConfigCell, handle: &Handle) {
     state.http_pools.update(&cfg.get().http_destinations, &state.ns, handle);
     state.session_pools.update(&cfg.get().session_pools,
         handle, &state.runtime);
+    // state.links_manager.update(&cfg.get().replication);
 }
